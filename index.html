@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pacientes — Sheets (v2)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>input[type=file]{display:none} dialog[open]{display:block}</style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <nav class="bg-white border-b sticky top-0 z-10">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="text-2xl">☁️</span>
+        <h1 class="text-xl font-semibold">Pacientes — Sheets</h1>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="btnAdd" type="button" class="px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700">Nuevo paciente</button>
+        <button id="btnReload" type="button" class="px-3 py-2 rounded-xl bg-gray-200 hover:bg-gray-300">Actualizar</button>
+      </div>
+    </div>
+  </nav>
+
+  <main class="max-w-6xl mx-auto px-4 py-6">
+    <div class="mb-4 grid grid-cols-1 md:grid-cols-6 gap-3">
+      <input id="search" class="md:col-span-4 px-3 py-2 rounded-xl border" placeholder="Buscar por nombre, documento o teléfono" />
+      <button id="btnClear" type="button" class="px-3 py-2 rounded-xl bg-gray-200 hover:bg-gray-300">Limpiar</button>
+      <div id="netState" class="text-sm text-gray-500 md:justify-self-end"></div>
+    </div>
+
+    <div id="list" class="grid gap-3"></div>
+
+    <dialog id="patientDialog" class="rounded-2xl p-0 w-full max-w-2xl">
+      <form id="patientForm" method="dialog" class="bg-white rounded-2xl shadow p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <h2 class="md:col-span-2 text-xl font-semibold"><span id="dialogTitle">Nuevo paciente</span></h2>
+        <input type="hidden" id="p_id" />
+        <div>
+          <label class="block text-sm text-gray-600">Nombre completo *</label>
+          <input id="p_full_name" required class="mt-1 px-3 py-2 rounded-xl border w-full" />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-600">Documento</label>
+          <input id="p_document_id" class="mt-1 px-3 py-2 rounded-xl border w-full" />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-600">Teléfono</label>
+          <input id="p_phone" class="mt-1 px-3 py-2 rounded-xl border w-full" />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-600">Email</label>
+          <input id="p_email" type="email" class="mt-1 px-3 py-2 rounded-xl border w-full" />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-600">Fecha de nacimiento</label>
+          <input id="p_birthdate" type="date" class="mt-1 px-3 py-2 rounded-xl border w-full" />
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-sm text-gray-600">Dirección</label>
+          <input id="p_address" class="mt-1 px-3 py-2 rounded-xl border w-full" />
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-sm text-gray-600">Notas</label>
+          <textarea id="p_notes" rows="3" class="mt-1 px-3 py-2 rounded-xl border w-full"></textarea>
+        </div>
+        <div class="md:col-span-2 flex items-center gap-2 justify-end">
+          <button type="button" id="btnCancel" class="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300">Cancelar</button>
+          <button type="submit" id="btnSavePatient" class="px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700">Guardar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <section id="detail" class="hidden"></section>
+  </main>
+
+  <footer class="text-center text-xs text-gray-500 py-6">Los datos se guardan en tu Google Sheets mediante Apps Script.</footer>
+
+  <script>
+  // ===== Pega aquí tu URL /exec =====
+  const API_URL = 'https://script.google.com/macros/s/AKfycbxxL7Sau_wC4Vg5-DLzK0y41EjlR6S1hgWEywnLIbUCSKlAoKJQY5doeAchSElQWulpcg/exec';
+
+  // ===== Helper UI =====
+  const $ = s => document.querySelector(s);
+  const netState = $('#netState');
+  const showNet = m => netState.textContent = m || '';
+
+  // ===== Polyfill simple para <dialog> si el navegador no soporta showModal =====
+  document.addEventListener('DOMContentLoaded', () => {
+    const dlg = $('#patientDialog');
+    if (!dlg.showModal) {
+      dlg.showModal = () => dlg.setAttribute('open', '');
+      dlg.close = () => dlg.removeAttribute('open');
+    }
+  });
+
+  // ===== Peticiones (sin headers para evitar preflight CORS) =====
+  async function apiGet(params){
+    const url = new URL(API_URL);
+    Object.entries(params||{}).forEach(([k,v])=> url.searchParams.set(k, v));
+    const res = await fetch(url.toString());
+    const txt = await res.text();
+    try { return JSON.parse(txt); } catch { return []; }
+  }
+  async function apiPost(body){
+    const res = await fetch(API_URL, { method:'POST', body: JSON.stringify(body) });
+    const txt = await res.text();
+    try { return JSON.parse(txt); } catch { return { ok:true, raw: txt }; }
+  }
+
+  // ===== Estado =====
+  let state = { patients: [], query: '' };
+
+  // ===== Inicio seguro cuando el DOM está listo =====
+  document.addEventListener('DOMContentLoaded', () => {
+    const listEl = $('#list');
+    const detailEl = $('#detail');
+    const searchEl = $('#search');
+    const dlg = $('#patientDialog');
+    const form = $('#patientForm');
+
+    $('#btnAdd').addEventListener('click', () => openForm());
+    $('#btnReload').addEventListener('click', () => loadPatients());
+    $('#btnClear').addEventListener('click', () => { searchEl.value=''; state.query=''; renderList(); });
+    $('#btnCancel').addEventListener('click', () => dlg.close());
+    searchEl.addEventListener('input', () => { state.query = searchEl.value; renderList(); });
+
+    function humanDate(d){ return d ? new Date(d).toISOString().slice(0,10) : '—'; }
+
+    function renderList(){
+      detailEl.classList.add('hidden');
+      listEl.innerHTML = '';
+      const q = (state.query||'').toLowerCase();
+      const rows = state.patients.filter(p=>(`${p.nombre||''} ${p.documento||''} ${p.telefono||''}`).toLowerCase().includes(q));
+      if(!rows.length){ listEl.innerHTML = '<div class="text-gray-500">No hay pacientes.</div>'; return; }
+      rows.forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'bg-white rounded-2xl shadow p-4 flex items-center justify-between';
+        div.innerHTML = `
+          <div>
+            <button class="text-lg font-semibold hover:underline" data-open="${p.id}">${p.nombre}</button>
+            <div class="text-sm text-gray-500">Doc: ${p.documento||'—'} · Tel: ${p.telefono||'—'} · Reg: ${humanDate(p.fecha_creacion)}</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="px-3 py-2 rounded-xl bg-amber-500 text-white hover:bg-amber-600" data-edit="${p.id}">Editar</button>
+            <button class="px-3 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700" data-del="${p.id}">Eliminar</button>
+          </div>`;
+        listEl.appendChild(div);
+      });
+      listEl.querySelectorAll('[data-open]').forEach(b=> b.addEventListener('click', () => openDetail(b.dataset.open)));
+      listEl.querySelectorAll('[data-edit]').forEach(b=> b.addEventListener('click', () => openForm(b.dataset.edit)));
+      listEl.querySelectorAll('[data-del]').forEach(b=> b.addEventListener('click', () => deletePatient(b.dataset.del)));
+    }
+
+    function openForm(id){
+      form.reset();
+      $('#dialogTitle').textContent = id ? 'Editar paciente' : 'Nuevo paciente';
+      $('#p_id').value = id || '';
+      if(id){
+        const p = state.patients.find(x=> x.id === id);
+        if(p){
+          $('#p_full_name').value = p.nombre||'';
+          $('#p_document_id').value = p.documento||'';
+          $('#p_phone').value = p.telefono||'';
+          $('#p_email').value = p.email||'';
+          $('#p_birthdate').value = p.fecha_nacimiento||'';
+          $('#p_address').value = p.direccion||'';
+          $('#p_notes').value = p.notas||'';
+        }
+      }
+      dlg.showModal();
+    }
+
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const id = $('#p_id').value || ('p_' + Date.now().toString(36));
+      const payload = {
+        action: 'upsert_patient',
+        data: {
+          id,
+          nombre: $('#p_full_name').value.trim(),
+          documento: $('#p_document_id').value.trim(),
+          telefono: $('#p_phone').value.trim(),
+          email: $('#p_email').value.trim(),
+          fecha_nacimiento: $('#p_birthdate').value || '',
+          direccion: $('#p_address').value.trim(),
+          notas: $('#p_notes').value.trim()
+        }
+      };
+      if(!payload.data.nombre){ alert('El nombre es obligatorio.'); return; }
+      try{
+        showNet('Guardando...');
+        await apiPost(payload);
+        dlg.close();
+        await loadPatients();
+        showNet('Guardado ✓'); setTimeout(()=> showNet(''), 1500);
+      }catch(e){ alert('Error guardando: '+e.message); showNet('Error'); }
+    });
+
+    async function deletePatient(id){
+      const p = state.patients.find(x=> x.id === id);
+      if(!p) return; if(!confirm(`¿Eliminar a "${p.nombre}"?`)) return;
+      try{ showNet('Eliminando...'); await apiPost({ action:'delete_patient', data:{ id } }); await loadPatients(); showNet('Eliminado ✓'); setTimeout(()=> showNet(''), 1500);}catch(e){ alert('Error: '+e.message); }
+    }
+
+    async function loadPatients(){
+      try{ showNet('Cargando...'); const data = await apiGet({ mode:'patients' }); state.patients = Array.isArray(data)?data:[]; renderList(); showNet(''); }
+      catch(e){ listEl.innerHTML = `<div class='text-red-700 bg-red-50 border border-red-200 rounded-xl p-3'>No se pudo cargar desde Google Sheets. Revisa la URL del script y permisos. <br><small>${e.message}</small></div>`; showNet('Error'); }
+    }
+
+    // Primer load
+    loadPatients();
+  });
+  </script>
+</body>
+</html>
