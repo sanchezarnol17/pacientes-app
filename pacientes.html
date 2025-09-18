@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Control de Pacientes — Google Sheets</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>input[type=file]{display:none}</style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <nav class="bg-white border-b sticky top-0 z-10">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="text-2xl">☁️</span>
+        <h1 class="text-xl font-semibold">Pacientes — Sheets</h1>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="btnAdd" class="px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700">Nuevo paciente</button>
+        <button id="btnReload" class="px-3 py-2 rounded-xl bg-gray-200 hover:bg-gray-300">Actualizar</button>
+      </div>
+    </div>
+  </nav>
+
+  <main class="max-w-6xl mx-auto px-4 py-6">
+    <div class="mb-4 grid grid-cols-1 md:grid-cols-6 gap-3">
+      <input id="search" class="md:col-span-4 px-3 py-2 rounded-xl border" placeholder="Buscar por nombre, documento o teléfono" />
+      <button id="btnClear" class="px-3 py-2 rounded-xl bg-gray-200 hover:bg-gray-300">Limpiar</button>
+      <div id="netState" class="text-sm text-gray-500 md:justify-self-end"></div>
+    </div>
+
+    <div id="list" class="grid gap-3"></div>
+
+    <dialog id="patientDialog" class="rounded-2xl p-0 w-full max-w-2xl">
+      <form id="patientForm" method="dialog" class="bg-white rounded-2xl shadow p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <h2 class="md:col-span-2 text-xl font-semibold"><span id="dialogTitle">Nuevo paciente</span></h2>
+        <input type="hidden" id="p_id" />
+        <div>
+          <label class="block text-sm text-gray-600">Nombre completo *</label>
+          <input id="p_full_name" required class="mt-1 px-3 py-2 rounded-xl border w-full" />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-600">Documento</label>
+          <input id="p_document_id" class="mt-1 px-3 py-2 rounded-xl border w-full" />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-600">Teléfono</label>
+          <input id="p_phone" class="mt-1 px-3 py-2 rounded-xl border w-full" />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-600">Email</label>
+          <input id="p_email" type="email" class="mt-1 px-3 py-2 rounded-xl border w-full" />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-600">Fecha de nacimiento</label>
+          <input id="p_birthdate" type="date" class="mt-1 px-3 py-2 rounded-xl border w-full" />
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-sm text-gray-600">Dirección</label>
+          <input id="p_address" class="mt-1 px-3 py-2 rounded-xl border w-full" />
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-sm text-gray-600">Notas</label>
+          <textarea id="p_notes" rows="3" class="mt-1 px-3 py-2 rounded-xl border w-full"></textarea>
+        </div>
+        <div class="md:col-span-2 flex items-center gap-2 justify-end">
+          <button value="cancel" class="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300">Cancelar</button>
+          <button id="btnSavePatient" value="default" class="px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700">Guardar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <section id="detail" class="hidden"></section>
+  </main>
+
+  <footer class="text-center text-xs text-gray-500 py-6">Los datos se guardan en tu Google Sheets mediante Apps Script.</footer>
+
+  <script>
+    // ===== Configura tu URL de Apps Script aquí =====
+    const API_URL = 'https://script.google.com/macros/s/AKfycbzm29f41nAUoI1QzktfS8rg7Qz21PTNET8WgtGj1Wrzluat9ID4vp4ZzjjXanX_QfFhBw/exec'; // ej: https://script.google.com/macros/s/XXXX/exec
+
+    // ===== Utils =====
+    const uid = () => 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+    const humanDate = d => d ? new Date(d).toISOString().slice(0,10) : '—';
+
+    const netState = document.getElementById('netState');
+    function showNet(msg){ netState.textContent = msg || ''; }
+
+    async function apiGet(params){
+      const url = new URL(API_URL);
+      Object.entries(params||{}).forEach(([k,v])=> url.searchParams.set(k, v));
+      const res = await fetch(url.toString());
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      return res.json();
+    }
+    async function apiPost(body){
+      const res = await fetch(API_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      return res.json();
+    }
+
+    // ===== Estado =====
+    let state = { patients: [], query: '' };
+
+    const listEl = document.getElementById('list');
+    const detailEl = document.getElementById('detail');
+    const searchEl = document.getElementById('search');
+    const dlg = document.getElementById('patientDialog');
+    const patientForm = document.getElementById('patientForm');
+    const dialogTitle = document.getElementById('dialogTitle');
+
+    document.getElementById('btnAdd').onclick = ()=> openForm();
+    document.getElementById('btnReload').onclick = ()=> loadPatients();
+    searchEl.oninput = ()=> { state.query = searchEl.value; renderList(); };
+    document.getElementById('btnClear').onclick = ()=> { searchEl.value=''; state.query=''; renderList(); };
+
+    function openForm(id){
+      patientForm.reset();
+      document.getElementById('p_id').value = id || '';
+      dialogTitle.textContent = id ? 'Editar paciente' : 'Nuevo paciente';
+      if(id){
+        const p = state.patients.find(x=> x.id === id);
+        if(p){
+          document.getElementById('p_full_name').value = p.nombre||'';
+          document.getElementById('p_document_id').value = p.documento||'';
+          document.getElementById('p_phone').value = p.telefono||'';
+          document.getElementById('p_email').value = p.email||'';
+          document.getElementById('p_birthdate').value = p.fecha_nacimiento||'';
+          document.getElementById('p_address').value = p.direccion||'';
+          document.getElementById('p_notes').value = p.notas||'';
+        }
+      }
+      dlg.showModal();
+    }
+
+    patientForm.addEventListener('submit', async (ev)=>{
+      ev.preventDefault();
+      const id = document.getElementById('p_id').value || uid();
+      const payload = {
+        action: 'upsert_patient',
+        data: {
+          id,
+          nombre: document.getElementById('p_full_name').value.trim(),
+          documento: document.getElementById('p_document_id').value.trim(),
+          telefono: document.getElementById('p_phone').value.trim(),
+          email: document.getElementById('p_email').value.trim(),
+          fecha_nacimiento: document.getElementById('p_birthdate').value || '',
+          direccion: document.getElementById('p_address').value.trim(),
+          notas: document.getElementById('p_notes').value.trim(),
+        }
+      };
+      if(!payload.data.nombre){ alert('El nombre es obligatorio.'); return; }
+      try{
+        showNet('Guardando...');
+        await apiPost(payload);
+        dlg.close();
+        await loadPatients();
+        showNet('Guardado ✓'); setTimeout(()=> showNet(''), 1500);
+      }catch(err){
+        alert('Error guardando: '+err.message);
+        showNet('Error');
+      }
+    });
+
+    function renderList(){
+      detailEl.classList.add('hidden');
+      listEl.innerHTML = '';
+      const q = state.query.toLowerCase();
+      const rows = state.patients.filter(p=>{
+        const hay = `${p.nombre||''} ${p.documento||''} ${p.telefono||''}`;
+        return hay.toLowerCase().includes(q);
+      }).sort((a,b)=> String(b.fecha_creacion||'').localeCompare(String(a.fecha_creacion||'')));
+
+      if(rows.length === 0){
+        listEl.innerHTML = '<div class="text-gray-500">No hay pacientes. Crea uno con “Nuevo paciente”.</div>';
+        return;
+      }
+
+      for(const p of rows){
+        const card = document.createElement('div');
+        card.className = 'bg-white rounded-2xl shadow p-4 flex items-center justify-between';
+        card.innerHTML = `
+          <div>
+            <button class="text-lg font-semibold hover:underline" data-open="${p.id}">${p.nombre}</button>
+            <div class="text-sm text-gray-500">Doc: ${p.documento||'—'} · Tel: ${p.telefono||'—'} · Reg: ${humanDate(p.fecha_creacion)}</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="px-3 py-2 rounded-xl bg-amber-500 text-white hover:bg-amber-600" data-edit="${p.id}">Editar</button>
+            <button class="px-3 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700" data-del="${p.id}">Eliminar</button>
+          </div>`;
+        listEl.appendChild(card);
+      }
+      listEl.querySelectorAll('[data-open]').forEach(b=> b.onclick = ()=> openDetail(b.dataset.open));
+      listEl.querySelectorAll('[data-edit]').forEach(b=> b.onclick = ()=> openForm(b.dataset.edit));
+      listEl.querySelectorAll('[data-del]').forEach(b=> b.onclick = ()=> deletePatient(b.dataset.del));
+    }
+
+    async function openDetail(id){
+      const p = state.patients.find(x=> x.id === id);
+      if(!p) return;
+      detailEl.classList.remove('hidden');
+      detailEl.innerHTML = `
+        <div class="bg-white rounded-2xl shadow p-6 mb-4">
+          <div class="flex items-start justify-between">
+            <div>
+              <h2 class="text-2xl font-bold">${p.nombre}</h2>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2 text-sm">
+                <div><span class="text-gray-500">Documento:</span> ${p.documento||'—'}</div>
+                <div><span class="text-gray-500">Teléfono:</span> ${p.telefono||'—'}</div>
+                <div><span class="text-gray-500">Email:</span> ${p.email||'—'}</div>
+                <div><span class="text-gray-500">Fecha nac.:</span> ${humanDate(p.fecha_nacimiento)}</div>
+                <div class="md:col-span-2"><span class="text-gray-500">Dirección:</span> ${p.direccion||'—'}</div>
+                <div class="md:col-span-2"><span class="text-gray-500">Notas:</span> ${p.notas||'—'}</div>
+              </div>
+            </div>
+            <div class="space-x-2">
+              <button class="px-3 py-2 rounded-xl bg-amber-500 text-white hover:bg-amber-600" data-edit="${p.id}">Editar</button>
+            </div>
+          </div>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-6">
+          <h3 class="text-xl font-semibold mb-3">Historial clínico</h3>
+          <form id="histForm" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+            <input type="date" id="h_date" class="px-3 py-2 rounded-xl border" value="${new Date().toISOString().slice(0,10)}" />
+            <input id="h_summary" class="md:col-span-2 px-3 py-2 rounded-xl border" placeholder="Resumen (Motivo/Diagnóstico/Procedimiento)" />
+            <textarea id="h_details" rows="3" class="md:col-span-3 px-3 py-2 rounded-xl border" placeholder="Detalles/Observaciones"></textarea>
+            <div class="md:col-span-3">
+              <button class="px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700">Añadir</button>
+            </div>
+          </form>
+          <div id="historyList" class="grid gap-3"></div>
+        </div>`;
+      detailEl.querySelector('[data-edit]').onclick = ()=> openForm(p.id);
+
+      const histForm = document.getElementById('histForm');
+      const hList = document.getElementById('historyList');
+
+      async function loadHistory(){
+        try{
+          showNet('Cargando historial...');
+          const data = await apiGet({ mode:'histories', patient_id: p.id });
+          renderHistory(data);
+          showNet('');
+        }catch(err){ alert('Error cargando historial: '+err.message); }
+      }
+
+      function renderHistory(items){
+        const rows = (items||[]).slice().sort((a,b)=> String(b.fecha||'').localeCompare(String(a.fecha||'')));
+        hList.innerHTML = rows.length ? '' : '<div class="text-gray-500">Aún no hay registros.</div>';
+        for(const h of rows){
+          const art = document.createElement('article');
+          art.className = 'bg-gray-50 rounded-2xl p-4 border';
+          art.innerHTML = `
+            <div class="flex items-center justify-between">
+              <div class="font-medium">${humanDate(h.fecha)} — ${h.resumen}</div>
+              <button class="text-red-600 hover:underline" data-del-h="${h.id}">Eliminar</button>
+            </div>
+            ${h.detalles ? `<p class="text-sm text-gray-700 mt-1 whitespace-pre-line">${h.detalles}</p>` : ''}
+          `;
+          hList.appendChild(art);
+        }
+        hList.querySelectorAll('[data-del-h]').forEach(btn=> btn.onclick = ()=> deleteHistory(btn.dataset.delH, p.id));
+      }
+
+      histForm.onsubmit = async (e)=>{
+        e.preventDefault();
+        const summary = document.getElementById('h_summary').value.trim();
+        if(!summary){ alert('El resumen es obligatorio.'); return; }
+        try{
+          showNet('Guardando historial...');
+          await apiPost({ action:'add_history', data:{
+            id: 'h_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+            patient_id: p.id,
+            fecha: document.getElementById('h_date').value || new Date().toISOString().slice(0,10),
+            resumen: summary,
+            detalles: document.getElementById('h_details').value.trim()
+          }});
+          histForm.reset();
+          document.getElementById('h_date').value = new Date().toISOString().slice(0,10);
+          await loadHistory();
+          showNet('Historial guardado ✓'); setTimeout(()=> showNet(''), 1500);
+        }catch(err){ alert('Error guardando historial: '+err.message); showNet('Error'); }
+      };
+
+      await loadHistory();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    async function deletePatient(id){
+      const p = state.patients.find(x=> x.id === id);
+      if(!p) return;
+      if(!confirm(`¿Eliminar definitivamente a "${p.nombre}" y su historial?`)) return;
+      try{
+        showNet('Eliminando...');
+        await apiPost({ action:'delete_patient', data:{ id } });
+        await loadPatients();
+        showNet('Eliminado ✓'); setTimeout(()=> showNet(''), 1500);
+      }catch(err){ alert('Error eliminando: '+err.message); showNet('Error'); }
+    }
+
+    async function deleteHistory(history_id, patient_id){
+      if(!confirm('¿Eliminar esta entrada del historial?')) return;
+      try{
+        showNet('Eliminando historial...');
+        await apiPost({ action:'delete_history', data:{ id: history_id, patient_id } });
+        await openDetail(patient_id);
+        showNet('Eliminado ✓'); setTimeout(()=> showNet(''), 1500);
+      }catch(err){ alert('Error eliminando historial: '+err.message); showNet('Error'); }
+    }
+
+    async function loadPatients(){
+      try{
+        showNet('Cargando...');
+        const data = await apiGet({ mode:'patients' });
+        state.patients = Array.isArray(data) ? data : [];
+        renderList();
+        showNet('');
+      }catch(err){
+        listEl.innerHTML = `<div class="text-red-700 bg-red-50 border border-red-200 rounded-xl p-3">No se pudo cargar desde Google Sheets. Revisa la URL del script y que el acceso esté en "Cualquiera con el enlace". <br><small>${err.message}</small></div>`;
+        showNet('Error');
+      }
+    }
+
+    // Inicio
+    loadPatients();
+  </script>
+</body>
+</html>
