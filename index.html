@@ -189,9 +189,9 @@
 
   <footer class="text-center text-xs text-gray-500 py-6">Datos guardados en Google Sheets mediante Apps Script.</footer>
 
-  <script>
+  <script defer>
   // ===== TU URL /exec (Apps Script desplegado)
-  const API_URL = 'https://script.google.com/macros/s/AKfycbx90wZNlHZhscS_NKRl1hcrKqr9XRTTkmpNW2M8bBmMe59qwMPwzGr1qfqzzGkFbrlFoA/exec';
+  const API_URL = 'https://script.google.com/macros/s/AKfycbwdmuKEX_3m8pUTYPZrZUmNNZ7A1t4jYlnxzhQiMQU57VGRIeqH2SBV4OJTEaRoHFmUOw/exec';
 
   // Helpers
   const $  = s => document.querySelector(s);
@@ -587,5 +587,39 @@
   // Cargar contabilidad al iniciar (para que al cambiar de pestaña ya esté)
   document.addEventListener('DOMContentLoaded', loadTx);
   </script>
+  <!-- 🔧 Script hotfix para botones -->
+<script defer>
+(function(){
+  const $ = s => document.querySelector(s);
+  const show = (el,flag)=> el && el.classList.toggle('hidden', !flag);
+
+  function setTabSafe(tab){
+    const isP = tab === 'patients';
+    show($('#patientsView'), isP);
+    show($('#subnavPatients'), isP);
+    show($('#accountingView'), !isP);
+    show($('#subnavAccounting'), !isP);
+    $('#tabPatients')?.classList.toggle('tab-active', isP);
+    $('#tabAccounting')?.classList.toggle('tab-active', !isP);
+  }
+
+  // tabs
+  $('#tabPatients')?.addEventListener('click', ()=> setTabSafe('patients'));
+  $('#tabAccounting')?.addEventListener('click', ()=> setTabSafe('accounting'));
+
+  // paciente
+  $('#btnAdd')?.addEventListener('click', ()=> $('#patientDialog')?.showModal());
+  $('#btnCancel')?.addEventListener('click', ()=> $('#patientDialog')?.close());
+
+  // contabilidad
+  $('#btnTxAdd')?.addEventListener('click', ()=> $('#txDialog')?.showModal());
+  $('#btnTxCancel')?.addEventListener('click', ()=> $('#txDialog')?.close());
+
+  // inicio
+  setTabSafe('patients');
+  console.info('Hotfix UI activo @', new Date().toISOString());
+})();
+</script>
 </body>
 </html>
+
