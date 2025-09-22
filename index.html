@@ -587,39 +587,38 @@
   // Cargar contabilidad al iniciar (para que al cambiar de pestaña ya esté)
   document.addEventListener('DOMContentLoaded', loadTx);
   </script>
-  <!-- 🔧 Script hotfix para botones -->
+<!-- 🔧 Hotfix 2: listeners ultra-compatibles -->
 <script defer>
-(function(){
-  const $ = s => document.querySelector(s);
-  const show = (el,flag)=> el && el.classList.toggle('hidden', !flag);
+window.addEventListener('load', function(){
+  function $(s){ return document.querySelector(s); }
+  function show(el,flag){ if(el){ el.classList.toggle('hidden', !flag); } }
 
   function setTabSafe(tab){
-    const isP = tab === 'patients';
+    var isP = (tab === 'patients');
     show($('#patientsView'), isP);
     show($('#subnavPatients'), isP);
     show($('#accountingView'), !isP);
     show($('#subnavAccounting'), !isP);
-    $('#tabPatients')?.classList.toggle('tab-active', isP);
-    $('#tabAccounting')?.classList.toggle('tab-active', !isP);
+    var tp = $('#tabPatients');  if(tp){ tp.classList.toggle('tab-active', isP); }
+    var ta = $('#tabAccounting');if(ta){ ta.classList.toggle('tab-active', !isP); }
   }
 
-  // tabs
-  $('#tabPatients')?.addEventListener('click', ()=> setTabSafe('patients'));
-  $('#tabAccounting')?.addEventListener('click', ()=> setTabSafe('accounting'));
+  var tp = $('#tabPatients');   if(tp){ tp.addEventListener('click', function(){ setTabSafe('patients'); }); }
+  var ta = $('#tabAccounting'); if(ta){ ta.addEventListener('click', function(){ setTabSafe('accounting'); }); }
 
-  // paciente
-  $('#btnAdd')?.addEventListener('click', ()=> $('#patientDialog')?.showModal());
-  $('#btnCancel')?.addEventListener('click', ()=> $('#patientDialog')?.close());
+  // Diálogo Pacientes
+  var btnAdd = $('#btnAdd');       if(btnAdd){ btnAdd.addEventListener('click', function(){ var d=$('#patientDialog'); if(d){ d.showModal? d.showModal(): d.setAttribute('open',''); } }); }
+  var btnCancel = $('#btnCancel'); if(btnCancel){ btnCancel.addEventListener('click', function(){ var d=$('#patientDialog'); if(d){ d.close? d.close(): d.removeAttribute('open'); } }); }
 
-  // contabilidad
-  $('#btnTxAdd')?.addEventListener('click', ()=> $('#txDialog')?.showModal());
-  $('#btnTxCancel')?.addEventListener('click', ()=> $('#txDialog')?.close());
+  // Diálogo Contabilidad
+  var btnTxAdd = $('#btnTxAdd');       if(btnTxAdd){ btnTxAdd.addEventListener('click', function(){ var d=$('#txDialog'); if(d){ d.showModal? d.showModal(): d.setAttribute('open',''); } }); }
+  var btnTxCancel = $('#btnTxCancel'); if(btnTxCancel){ btnTxCancel.addEventListener('click', function(){ var d=$('#txDialog'); if(d){ d.close? d.close(): d.removeAttribute('open'); } }); }
 
-  // inicio
   setTabSafe('patients');
-  console.info('Hotfix UI activo @', new Date().toISOString());
-})();
+  console.log('Hotfix2 listo');
+});
 </script>
 </body>
 </html>
+
 
