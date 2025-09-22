@@ -377,7 +377,7 @@
               <div class="font-medium">${humanDate(h.fecha)} — ${h.resumen||''}</div>
               <button class="text-red-600 hover:underline" data-del-h="${h.id}">Eliminar</button>
             </div>
-            ${h.detalles ? `<p class="text-sm text-gray-700 mt-1 whitespace-pre-line">${h.detalles}</p>` : ''}`;
+            ${h.detalles ? ('<p class="text-sm text-gray-700 mt-1 whitespace-pre-line">'+h.detalles+'</p>') : '' }`;
           hList.appendChild(art);
         }
         hList.querySelectorAll('[data-del-h]').forEach(btn=> btn.onclick = async ()=>{
@@ -529,7 +529,7 @@
         <div>
           <div class="font-semibold">${t.tipo==='ingreso'?'🟢 Ingreso':'🔴 Gasto'} — ${t.concepto||'(sin concepto)'} <span class="text-gray-500">· ${t.categoria||'—'}</span></div>
           <div class="text-sm text-gray-500">${t.fecha||'—'} · ${t.metodo||'—'} ${t.paciente?('· Paciente: '+t.paciente):''}</div>
-          ${t.notas? `<div class="text-sm mt-1">${t.notas}</div>`: '' }
+          ${t.notas ? ('<div class="text-sm mt-1">'+t.notas+'</div>') : '' }
         </div>
         <div class="flex items-center gap-2">
           <div class="font-bold ${t.tipo==='ingreso'?'text-emerald-700':'text-red-700'}">${human(Number(t.monto||0))}</div>
@@ -620,6 +620,4 @@ window.addEventListener('load', function(){
 </script>
 </body>
 </html>
-
-
 
